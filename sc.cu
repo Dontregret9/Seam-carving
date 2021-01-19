@@ -160,7 +160,7 @@ char * concatStr(const char * s1, const char * s2)
 }
 
 
-void writeEnergyMatrix(float * matrix, int width, int height, char * fileName)
+void writeMatrix(float * matrix, int width, int height, char * fileName)
 {
 	FILE * f = fopen(fileName, "w");
 	if (f == NULL)
@@ -206,60 +206,57 @@ void convolution(uint8_t * inPixels, int width, int height, float * filter, int 
 		}
 }
 
-void computeEnergy(uint8_t * inPixels, int width, int height,float* gradX, float* gradY, float * outPixels)
+void calcEnergy(uint8_t * inPixels, int width, int height,float* _X, float* _Y, float * outPixels)
 {
 	int filterWidth = 3;
 	float sobelX[9] = {1,0,-1,2,0,-2,1,0,-1};
 	float sobelY[9] = {1,2,1,0,0,0,-1,-2,-1};
 
+	convolution(inPixels, width, height, sobelX, filterWidth, _X);
 	
-	convolution(inPixels, width, height, sobelX, filterWidth, gradX);
-
-	
-	convolution(inPixels, width, height, sobelY, filterWidth, gradY);
+	convolution(inPixels, width, height, sobelY, filterWidth, _Y);
 
 	for (int r = 0; r < height; r++)
 	{
 		for (int c = 0; c < width; c++)
 		{
 			int i = r*width + c;
-			outPixels[i] = abs(gradX[i]) + abs(gradY[i]);
+			outPixels[i] = abs(_X[i]) + abs(_Y[i]);
 		}
 	}
 }
 
-void createCumulativeEnergyMap(float* energy, int width, int height, float* table)
+void calcCumulativeEnergyMatrix(float* energyMatrix, int width, int height, float* sumEnergyMatrix)
 {
-	int _size = height * width;
-	float* lastRowEnergy = &energy[_size -1];
-	float* lastRowTable = &table[_size - 1];
-	// Copy dong cuoi cung cua energy
-	for (int p = width ; p > 0; p--)
+	float* lastRowEnergy = &energyMatrix[height * width -1];
+	float* lastRowTable = &sumEnergyMatrix[height * width - 1];
+
+	for (int i = width ; i > 0; i--)
 	{
-		*(table + _size - p ) = *(lastRowEnergy - p + 1);
+		*(sumEnergyMatrix + height * width - i ) = *(lastRowEnergy - i + 1);
 	}
 	// Duyet mang energy
 	for (int row = height - 2; row  >=  0; row--, lastRowEnergy -= width , lastRowTable -= width)
 	{
-		float* pRow = lastRowEnergy;
-		float* pRowTable = lastRowTable;
 		// Xet vi tri dau cua mot dong
-		pRowTable[-width ] = pRow[-width] + min(pRowTable[0] , pRowTable[-1] );
+		lastRowTable[-width ] = lastRowEnergy[-width] + min(lastRowTable[0] , lastRowTable[-1] );
 		// Xet cac vi khac
 		for (int col = 2; col < width ; col++)
 		{
-			*(pRowTable -col - width + 1) = *(pRow - col - width + 1) + min(min(pRowTable[-col + 1] , pRowTable[-col] ), pRowTable[-col + 2] );
+			*(lastRowTable -col - width + 1) = *(lastRowEnergy - col - width + 1) + min(min(lastRowTable[-col + 1] , lastRowTable[-col] ), lastRowTable[-col + 2] );
 		}
 		// Xet vi tri cuoi
-		pRowTable[-width - width + 1] = pRow[-width - width + 1] + min(pRowTable[-width + 1] , pRowTable[-width + 2] );
+		lastRowTable[-width - width + 1] = lastRowEnergy[-width - width + 1] + min(lastRowTable[-width + 1] , lastRowTable[-width + 2] );
 	}
 }
 
 
-void findOptSeam(float * table, int width, int height, float * optSeam)
+
+
+void meaningLess_Seam(float * sumEnergyMatrix, int width, int height, float * chosenSeam)
 {
 	int tmp;
-	float* pTable = table;
+	float* pTable = sumEnergyMatrix;
 	// Tim phan tu nho nhat trong dong thu 0
 	int minVal = pTable[0];
 	int minPos = 0;
@@ -272,7 +269,7 @@ void findOptSeam(float * table, int width, int height, float * optSeam)
 			minPos = i;
 		}
 	}
-	optSeam[0] = minPos;
+	chosenSeam[0] = minPos;
 	pTable += width;
 	// Duyet qua các dong
 	for (int row = 1; row < height; row++, pTable +=width)
@@ -294,36 +291,37 @@ void findOptSeam(float * table, int width, int height, float * optSeam)
 			else
 				minPos = tmp;
 		}
-		optSeam[row] = minPos;
+		chosenSeam[row] = minPos;
 	}
 }
 
-void deleteOptSeam(uint8_t * inPixels, float* table, float* eneryMatrix, float* chosenSeam, int height, int cur_width)
+void deleteChosenSeam(uint8_t * inPixels, float* table, float* energyMatrix, float* chosenSeam, int height, int cur_width)
 {
-	// // convert position in row --> position in all matrix
-	// for(int i=0;i<height;i++0)
-	// {
-	// 	chosenSeam[i] += i*cur_width;
+	// convert position in row --> position in all matrix
+	for(int i=0;i<height;i++)
+	{
+		chosenSeam[i] += i*cur_width;
 
-	// 	for(int j=chosenSeam[i]-i; j<cur_width*height-i-1;j++)
-	// 	{
-	// 		table[j] = table[j+1];
-	// 		energyMatrix[j] = energyMatrix[j+1]
+		for(int j=chosenSeam[i]-i; j<cur_width*height-i-1;j++)
+		{
+			table[j] = table[j+1];
+			energyMatrix[j] = energyMatrix[j+1];
 
-	// 		//delete in P3 color
-			
-	// 	}
-	// }
+			//delete in P3 color
+			inPixels[j*3] = inPixels[(j+1)*3];
+			inPixels[j*3+1] = inPixels[(j+1)*3 + 1];
+			inPixels[j*3+2] = inPixels[(j+1)*3 + 2];
+		}
+	}
 }
 
 int main(int argc, char ** argv)
 {	
-	if (argc != 4 && argc != 6)
+	for(int i=0;i<argc;i++)
 	{
-		printf("The number of arguments is invalid\n");
-		return EXIT_FAILURE;
+		printf("%d: %s\n ",i, argv[i]);
 	}
-	
+
 	// Read input RGB image file
 	int numChannels, width, height;
 	uint8_t * inPixels;
@@ -333,51 +331,48 @@ int main(int argc, char ** argv)
 	printf("Image size (width x height): %i x %i\n\n", width, height);
 
 	// Convert RGB to grayscale not using device
-	uint8_t * correctOutPixels= (uint8_t *)malloc(width * height);
-	convertRgb2Gray(inPixels, width, height, correctOutPixels);
+	uint8_t * grayOutPixels= (uint8_t *)malloc(width * height);
+	convertRgb2Gray(inPixels, width, height, grayOutPixels);
 
 	// Write results to files
 	char * outFileNameBase = strtok(argv[2], "."); // Get rid of extension
-	writePnm(correctOutPixels, 1, width, height, concatStr(outFileNameBase, "_host.pnm"));
+	writePnm(grayOutPixels, 1, width, height, concatStr(outFileNameBase, ".pnm"));
 
-    // Here correctOutPixels is grayscale image
 
     float* gradX = (float*)malloc(width*height*sizeof(float));
     float* gradY = (float*)malloc(width*height*sizeof(float));
     float* energyMatrix = (float*)malloc(width*height*sizeof(float));
-    computeEnergy(correctOutPixels, width, height, gradX, gradY, energyMatrix);
+    calcEnergy(grayOutPixels, width, height, gradX, gradY, energyMatrix);
     
-    writeEnergyMatrix(energyMatrix, width, height, argv[3]);
-	writeEnergyMatrix(gradX, width, height, argv[4]);
-    writeEnergyMatrix(gradY, width, height, argv[5]);
+    writeMatrix(energyMatrix, width, height, argv[3]);
     
-	float* table = (float*)malloc(width*height*sizeof(float));
-	float* optSeam = (float*)malloc(height*sizeof(float));
+	float* sumEnergyMatrix = (float*)malloc(width*height*sizeof(float));
+	float* chosenSeam = (float*)malloc(height*sizeof(float));
 
-    // int width_expect = argv[6];
-    // int cur_width = width;
-    // while(width_expect < cur_width)
-    // {
-    //     // find the seam will be remove
-    //     createCumulativeEnergyMap(energyMatrix, width, height, table);
-    //     writeEnergyMatrix(table, width, height, argv[5]);
+    int width_expect = atoi(argv[6]);
+    int cur_width = width;
+    while(width_expect < cur_width)
+    {
+		// calculate cumulative energy matrix
+		calcCumulativeEnergyMatrix(energyMatrix, cur_width, height, sumEnergyMatrix);
+        // find the seam will be remove
+		meaningLess_Seam(sumEnergyMatrix, cur_width, height, chosenSeam);
+		
+        // remove this seam (in eneryMatrix, sumEnergyMatrix and pnm image)
+		deleteChosenSeam(inPixels, sumEnergyMatrix, energyMatrix, chosenSeam, height, cur_width);
+		cur_width--;
+	}
+	
+	writeMatrix(energyMatrix, cur_width, height, argv[4]);
+	writePnm(inPixels,3,cur_width,height,argv[5]);
+    printf("Image size after Seam Carving (width x height): %i x %i\n\n", cur_width, height);
 
-    //     findOptSeam(table, width, height, optSeam);
-    //     // remove this seam (in eneryMatrix & table)
-	// 	deleteOptSeam(inPixels, table, energyMatrix, cur_width, height, optSeam);
-	// 	cur_width--;
-    // }
-
-
-
-
-    
     // Free memories
     free(gradX);
 	free(gradY);
     free(inPixels);
     
 	free(energyMatrix);
-	free(table);
-	free(optSeam);
+	free(sumEnergyMatrix);
+	free(chosenSeam);
 }
