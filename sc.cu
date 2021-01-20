@@ -1,54 +1,6 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#define CHECK(call)\
-{\
-	const cudaError_t error = call;\
-	if (error != cudaSuccess)\
-	{\
-		fprintf(stderr, "Error: %s:%d, ", __FILE__, __LINE__);\
-		fprintf(stderr, "code: %d, reason: %s\n", error,\
-				cudaGetErrorString(error));\
-		exit(EXIT_FAILURE);\
-	}\
-}
-
-struct GpuTimer
-{
-	cudaEvent_t start;
-	cudaEvent_t stop;
-
-	GpuTimer()
-	{
-		cudaEventCreate(&start);
-		cudaEventCreate(&stop);
-	}
-
-	~GpuTimer()
-	{
-		cudaEventDestroy(start);
-		cudaEventDestroy(stop);
-	}
-
-	void Start()
-	{
-		cudaEventRecord(start, 0);                                                                 
-		cudaEventSynchronize(start);
-	}
-
-	void Stop()
-	{
-		cudaEventRecord(stop, 0);
-	}
-
-	float Elapsed()
-	{
-		float elapsed;
-		cudaEventSynchronize(stop);
-		cudaEventElapsedTime(&elapsed, start, stop);
-		return elapsed;
-	}
-};
 
 void readPnm(char * fileName, 
 		int &numChannels, int &width, int &height, uint8_t * &pixels)
@@ -126,28 +78,18 @@ void convertRgb2Gray(uint8_t * inPixels, int width, int height,
 		uint8_t * outPixels, 	
 		bool useDevice=false, dim3 blockSize=dim3(1))
 {
-	GpuTimer timer;
-	timer.Start();		
-	if (useDevice == false)
+	// Reminder: gray = 0.299*red + 0.587*green + 0.114*blue  
+	for (int r = 0; r < height; r++)
 	{
-        // Reminder: gray = 0.299*red + 0.587*green + 0.114*blue  
-        for (int r = 0; r < height; r++)
-        {
-            for (int c = 0; c < width; c++)
-            {
-                int i = r * width + c;
-                uint8_t red = inPixels[3 * i];
-                uint8_t green = inPixels[3 * i + 1];
-				uint8_t blue = inPixels[3 * i + 2];
-				outPixels[i] = 0.299f*red + 0.587f*green + 0.114f*blue;
-            }
-        }
+		for (int c = 0; c < width; c++)
+		{
+			int i = r * width + c;
+			uint8_t red = inPixels[3 * i];
+			uint8_t green = inPixels[3 * i + 1];
+			uint8_t blue = inPixels[3 * i + 2];
+			outPixels[i] = 0.299f*red + 0.587f*green + 0.114f*blue;
+		}
 	}
-
-	timer.Stop();
-	float time = timer.Elapsed();
-	printf("Processing time (%s): %f ms\n\n", 
-			useDevice == true? "use device" : "use host", time);
 }
 
 
@@ -249,8 +191,6 @@ void calcCumulativeEnergyMatrix(float* energyMatrix, int width, int height, floa
 		lastRowTable[-width - width + 1] = lastRowEnergy[-width - width + 1] + min(lastRowTable[-width + 1] , lastRowTable[-width + 2] );
 	}
 }
-
-
 
 
 void meaningLess_Seam(float * sumEnergyMatrix, int width, int height, float * chosenSeam)
