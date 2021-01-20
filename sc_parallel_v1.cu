@@ -162,7 +162,7 @@ void convertRgb2Gray(uint8_t * inPixels, int width, int height,
     CHECK(cudaMemcpy(d_inPixels,inPixels,height*width*3*sizeof(uint8_t),cudaMemcpyHostToDevice));
 
     // TODO: Set grid size and call kernel (remember to check kernel error)
-    dim3 gridSize( ((height-1)/blockSize.x + 1) , ((width-1)/blockSize.y + 1) );
+    dim3 gridSize(((width-1)/blockSize.x + 1), ((height-1)/blockSize.y + 1));;
 
     convertRgb2GrayKernel<<<gridSize,blockSize>>>(d_inPixels,width,height,d_outPixels);
 
@@ -170,8 +170,8 @@ void convertRgb2Gray(uint8_t * inPixels, int width, int height,
     CHECK(cudaMemcpy(outPixels,d_outPixels,height*width*sizeof(uint8_t),cudaMemcpyDeviceToHost));
 
     // TODO: Free device memories
-        cudaFree(d_inPixels);
-        cudaFree(d_outPixels);
+	cudaFree(d_inPixels);
+	cudaFree(d_outPixels);
 
 	timer.Stop();
 	float time = timer.Elapsed();
@@ -278,9 +278,6 @@ void calcCumulativeEnergyMatrix(float* energyMatrix, int width, int height, floa
 	}
 }
 
-
-
-
 void meaningLess_Seam(float * sumEnergyMatrix, int width, int height, float * chosenSeam)
 {
 	int tmp;
@@ -361,11 +358,7 @@ int main(int argc, char ** argv)
 	// Convert RGB to grayscale using device
 	uint8_t * grayOutPixels= (uint8_t *)malloc(width * height);
 	dim3 blockSize(32, 32); // Default
-	if (argc == 5)
-	{
-		blockSize.x = atoi(argv[3]);
-		blockSize.y = atoi(argv[4]);
-	} 
+
 	convertRgb2Gray(inPixels, width, height, grayOutPixels, blockSize); 
 	cudaError_t errSync = cudaGetLastError();
 	cudaError_t errAsync = cudaDeviceSynchronize();
