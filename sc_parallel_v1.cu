@@ -278,6 +278,35 @@ void calcCumulativeEnergyMatrix(float* energyMatrix, int width, int height, floa
 	}
 }
 
+__global__ void calcCumulativeEnergyMatrixKernel(float* energyMatrix,
+	 int width,	 int height, float* sumEnergyMatrix)
+{
+	float* lastRowEnergy = &energyMatrix[height * width -1];
+	float* lastRowTable = &sumEnergyMatrix[height * width - 1];
+
+	//thread's global id
+	int i = threadIdx.x + blockIdx.x * blockDim.x;
+
+	if(i >= width)
+		return;
+
+	*(lastRowTable - i) = *(lastRowEnergy - i);
+	__syncthreads();
+
+	for (int row = height - 2; row  >=  0;
+		row--, lastRowEnergy -= width , lastRowTable -= width)
+	 {
+		 // Xet vi tri dau cua mot dong
+		 if(i == 0)
+			 lastRowTable[-width] = lastRowEnergy[-width] + min(lastRowTable[0] , lastRowTable[-1] );
+			 else if(i == width-1) // Xet vi tri cuoi
+			 lastRowTable[-width - width + 1] = lastRowEnergy[-width - width + 1] + min(lastRowTable[-width + 1] , lastRowTable[-width + 2] );
+			 else // Xet cac vi tri khac
+		 *(lastRowTable -i - width) = *(lastRowEnergy -i - width) + min(min(lastRowTable[-i + 1] , lastRowTable[-i] ), lastRowTable[-i -1] );
+		 __syncthreads();
+	 }
+}
+
 void meaningLess_Seam(float * sumEnergyMatrix, int width, int height, float * chosenSeam)
 {
 	int tmp;
@@ -398,14 +427,36 @@ int main(int argc, char ** argv)
     int cur_width = width;
     while(width_expect < cur_width)
     {
-		// calculate cumulative energy matrix
-		calcCumulativeEnergyMatrix(energyMatrix, cur_width, height, sumEnergyMatrix);
+// 		//Serial implementation
+// 		calcCumulativeEnergyMatrix(energyMatrix, cur_width, height, sumEnergyMatrix);
+	    
+	//Parallel implementation
+	float* d_energyMatrix;
+	float* d_sumEnergyMatrix;
+	CHECK(cudaMalloc(&d_energyMatrix, width*height*sizeof(float)));
+	CHECK(cudaMalloc(&d_sumEnergyMatrix, width*height*sizeof(float)));
+	CHECK(cudaMemcpy(d_energyMatrix, energyMatrix, width*height*sizeof(float), cudaMemcpyHostToDevice));
+	
+	//remember to edit
+	calcCumulativeEnergyMatrixKernel<<<1, 1024>>>(d_energyMatrix, cur_width, height, d_sumEnergyMatrix);
+	
+	cudaDeviceSynchronize();
+	CHECK(cudaGetLastError());
+
+	CHECK(cudaMemcpy(sumEnergyMatrix, d_sumEnergyMatrix, width*height*sizeof(float), cudaMemcpyDeviceToHost));
+	
+	    
+	    
         // find the seam will be remove
 		meaningLess_Seam(sumEnergyMatrix, cur_width, height, chosenSeam);
 		
         // remove this seam (in eneryMatrix, sumEnergyMatrix and pnm image)
 		deleteChosenSeam(inPixels, sumEnergyMatrix, energyMatrix, chosenSeam, height, cur_width);
 		cur_width--;
+	    
+	    
+	cudaFree(d_energyMatrix);
+	cudaFree(d_sumEnergyMatrix);
 	}
 	
 	writeMatrix(energyMatrix, cur_width, height, argv[4]);
