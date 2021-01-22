@@ -418,6 +418,99 @@ void meaningLess_Seam(float * sumEnergyMatrix, int width, int height, float * ch
 	}
 }
 
+__global__ void reductionMin_Kernel(float *firstRow, int width,
+	 float* minValue, int* minPos)
+{
+
+   extern __shared__ float sharedMinValue[];
+	 extern __shared__ int sharedMinIndex[];
+
+	 int tid = threadIdx.x;
+	 int i = blockIdx.x*blockDim.x + tid;
+	 sharedMinValue[tid] = FLT_MAX;
+
+	 if (i < width){
+		 	 float temp = firstRow[i];
+	 		 sharedMinValue[tid] = temp;
+	 		 sharedMinIndex[tid] = i;
+
+	 	 }
+	  __syncthreads();
+
+	  for ( int s=blockDim.x/2; s>0; s>>=1)
+	  {
+	 		 if (tid < s && i < width){
+
+	 				 if(sharedMinValue[tid] > sharedMinValue[tid+s]){
+	 					 sharedMinValue[tid]=sharedMinValue[tid+s];
+	 					 sharedMinIndex[tid]= sharedMinIndex[tid+s];
+	 				 }// 2
+			}
+	 		 __syncthreads();
+	  }
+
+	 if (tid == 0){
+	 minValue = &sharedMinValue[0];
+	 minPos = &sharedMinIndex[0];
+	 }
+	 __syncthreads();
+
+}
+
+void meaningLess_Seam_Kernel(float * sumEnergyMatrix, int width, int height, float * chosenSeam)
+{
+	float* firstRow = sumEnergyMatrix;
+	float *minValuePointer = (float *)malloc(1 * sizeof(float));
+	int *minPosPointer = (int *)malloc(1 * sizeof(int));
+
+	float* d_firstRow;
+	CHECK(cudaMalloc(&d_firstRow, sizeof(float) * width ));
+	CHECK(cudaMemcpy(d_firstRow, firstRow, sizeof(float) * width, cudaMemcpyHostToDevice));
+	float *d_minValuePointer;
+	CHECK(cudaMalloc(&d_minValuePointer, sizeof(float) * 1 ));
+	int *d_minPosPointer;
+	CHECK(cudaMalloc(&d_minPosPointer, sizeof(int) * 1 ));
+
+	reductionMin_Kernel<<<1, 1024, 4096>>>(d_firstRow, width, d_minValuePointer, d_minPosPointer);
+	cudaDeviceSynchronize();
+	CHECK(cudaGetLastError());
+
+	CHECK(cudaMemcpy(minValuePointer, d_minValuePointer, sizeof(float)*1, cudaMemcpyDeviceToHost));
+	CHECK(cudaMemcpy(minPosPointer, d_minPosPointer, sizeof(int)*1, cudaMemcpyDeviceToHost));
+
+	int tmp;
+	float* pTable = sumEnergyMatrix;
+
+	int minVal = *minValuePointer;
+	int minPos = *minPosPointer;
+	chosenSeam[0] = minPos;
+
+	pTable += width;
+	// Duyet qua các dong
+	for (int row = 1; row < height; row++, pTable +=width)
+	{
+		if (minPos == 0) //  o dau
+		{
+			minPos = pTable[0] < pTable[1] ? 0 : 1;
+
+		}
+		else if(minPos == width - 1) // o cuoi
+		{
+			minPos = pTable[width - 1] < pTable[width - 2] ? width - 1 : width - 2;
+		}
+		else // o giua
+		{
+			tmp = pTable[minPos] < pTable[minPos + 1] ? minPos : minPos + 1;
+			if (pTable[tmp] > pTable[minPos - 1])
+				minPos = minPos - 1;
+			else
+				minPos = tmp;
+		}
+		chosenSeam[row] = minPos;
+	}
+}
+
+
 void deleteChosenSeam(uint8_t * inPixels, float* table, float* energyMatrix, float* chosenSeam, int height, int cur_width)
 {
 	// convert position in row --> position in all matrix
@@ -513,7 +606,7 @@ int main(int argc, char ** argv)
 		CHECK(cudaMemcpy(sumEnergyMatrix, d_sumEnergyMatrix, width*height*sizeof(float), cudaMemcpyDeviceToHost));
 			
 		// find the seam will be remove
-		meaningLess_Seam(sumEnergyMatrix, cur_width, height, chosenSeam);
+		meaningLess_Seam_Kernel(sumEnergyMatrix, cur_width, height, chosenSeam);
 		
 		// remove this seam (in eneryMatrix, sumEnergyMatrix and pnm image)
 		deleteChosenSeam(inPixels, sumEnergyMatrix, energyMatrix, chosenSeam, height, cur_width);
